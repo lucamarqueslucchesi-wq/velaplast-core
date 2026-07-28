@@ -15,6 +15,7 @@ Isso permite que mudanças em `velaplast_core/` reflitam imediatamente em todos 
 ## Uso
 
 ```python
+from velaplast_core.pdv import PDVClient
 from velaplast_core.sap import SAPClient
 from velaplast_core.finance import build_tax_map, calcular_faturamento_net
 from velaplast_core.livemes import LiveMESClient
@@ -29,6 +30,7 @@ from velaplast_core.auth import login_required, role_required
 
 | Módulo | Status |
 |---|---|
+| `pdv/` | ✅ pronto — cliente + MCP `pdv-velaplast`, ver [docs/PDV.md](docs/PDV.md) |
 | `sap/` | 🔜 |
 | `livemes/` | 🔜 |
 | `spotter/` | 🔜 |
