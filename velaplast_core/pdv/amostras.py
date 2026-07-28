@@ -264,6 +264,31 @@ def dias_no_estagio(
 # ─── Carga ────────────────────────────────────────────────────────────────
 
 
+#: Atributos que, juntos, formam o nome do produto. O PDV não guarda um nome
+#: pronto: `produto_vendido_como` é a ORIGEM (producao_interna/revenda) e vem
+#: preenchido em menos de 7% dos cadastros — usar aquele campo como nome põe
+#: "revenda" na tela no lugar de "Bombona 20 Litros".
+ATRIBUTOS_DO_NOME = ("descricao_id", "volume_embalagem_id", "peso_id", "cor_id")
+
+
+def _nome_do_produto(registro: dict, catalogos: dict[int, dict]) -> str | None:
+    """Monta 'Frasco 1 Litro 105 g Branca' a partir dos atributos de catálogo."""
+    partes: list[str] = []
+    for campo in ATRIBUTOS_DO_NOME:
+        valor = registro.get(campo)
+        if not valor:
+            continue
+        nome = (catalogos.get(int(valor)) or {}).get("name")
+        if nome:
+            partes.append(str(nome))
+    montado = " ".join(partes).strip()
+    if montado:
+        rcp = registro.get("rcp")
+        return f"{montado} (RCP {rcp})" if rcp else montado
+    # Sem atributos, cai no que houver de identificação.
+    return registro.get("rcp") or registro.get("sku") or None
+
+
 def _indexar_itens(client: PDVClient, ids: set[int]) -> dict[int, list[dict]]:
     """Itens (normais + personalizados) agrupados por pedido.
 
@@ -272,13 +297,18 @@ def _indexar_itens(client: PDVClient, ids: set[int]) -> dict[int, list[dict]]:
     """
     por_pedido: dict[int, list[dict]] = {}
 
+    catalogos = client.catalogos()
+
     normais = client.listar_tudo(
         "pedido-itens",
         fields="id,pedido_id,produto_id,quantidade_pedida,quantidade_real,valor_unitario,data_entrega_desejada",
     )
     produtos = {
         int(p["id"]): p
-        for p in client.listar_tudo("produtos", fields="id,rcp,sku,produto_vendido_como,tipo")
+        for p in client.listar_tudo(
+            "produtos",
+            fields="id,rcp,sku,tipo,descricao_id,peso_id,cor_id,volume_embalagem_id",
+        )
     }
     for item in normais:
         pid = item.get("pedido_id")
@@ -288,16 +318,19 @@ def _indexar_itens(client: PDVClient, ids: set[int]) -> dict[int, list[dict]]:
         por_pedido.setdefault(pid, []).append({
             "origem": "produto",
             "produto_id": item.get("produto_id"),
-            "descricao": (prod or {}).get("produto_vendido_como")
-            or (prod or {}).get("rcp")
-            or (prod or {}).get("sku"),
+            "descricao": _nome_do_produto(prod or {}, catalogos),
+            "tipo": (prod or {}).get("tipo"),
+            "rcp": (prod or {}).get("rcp"),
             "quantidade": item.get("quantidade_real") or item.get("quantidade_pedida"),
             "valor_unitario": item.get("valor_unitario"),
         })
 
     personalizados = client.listar_tudo(
         "pedido-itens-personalizados",
-        fields="id,pedido_id,produto_vendido_como,sku,rcp,quantidade_pedida,quantidade_real,valor_unitario",
+        fields=(
+            "id,pedido_id,tipo,sku,rcp,quantidade_pedida,quantidade_real,valor_unitario,"
+            "descricao_id,peso_id,cor_id,volume_embalagem_id"
+        ),
     )
     for item in personalizados:
         pid = item.get("pedido_id")
@@ -306,7 +339,9 @@ def _indexar_itens(client: PDVClient, ids: set[int]) -> dict[int, list[dict]]:
         por_pedido.setdefault(pid, []).append({
             "origem": "personalizado",
             "produto_id": None,
-            "descricao": item.get("produto_vendido_como") or item.get("rcp") or item.get("sku"),
+            "descricao": _nome_do_produto(item, catalogos),
+            "tipo": item.get("tipo"),
+            "rcp": item.get("rcp"),
             "quantidade": item.get("quantidade_real") or item.get("quantidade_pedida"),
             "valor_unitario": item.get("valor_unitario"),
         })

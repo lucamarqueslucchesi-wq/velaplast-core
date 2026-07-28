@@ -289,3 +289,46 @@ def test_carga_incremental_e_subconjunto_da_completa(carregadas):
     ids_todas = {a.pedido_id for a in carregadas}
     assert {a.pedido_id for a in parciais} <= ids_todas
     assert len(parciais) < len(carregadas), "filtro por data deveria reduzir o conjunto"
+
+
+# ─── Nome do produto ──────────────────────────────────────────────────────
+
+
+def test_nome_do_produto_vem_dos_atributos_nao_da_origem():
+    """`produto_vendido_como` é a ORIGEM (revenda/producao_interna), não o nome.
+
+    Usar aquele campo escrevia "revenda" na tela no lugar do produto.
+    """
+    from velaplast_core.pdv.amostras import _nome_do_produto
+
+    catalogos = {
+        41: {"name": "Frasco"}, 137: {"name": "1 Litro"},
+        85: {"name": "105 g"}, 66: {"name": "Branca"},
+    }
+    produto = {
+        "descricao_id": 41, "volume_embalagem_id": 137, "peso_id": 85, "cor_id": 66,
+        "rcp": "1105", "produto_vendido_como": "revenda",
+    }
+    nome = _nome_do_produto(produto, catalogos)
+    assert nome == "Frasco 1 Litro 105 g Branca (RCP 1105)"
+    assert "revenda" not in nome
+
+
+def test_nome_do_produto_sem_atributos_cai_no_rcp():
+    from velaplast_core.pdv.amostras import _nome_do_produto
+
+    assert _nome_do_produto({"rcp": "2154"}, {}) == "2154"
+    assert _nome_do_produto({"sku": "ABC"}, {}) == "ABC"
+    assert _nome_do_produto({}, {}) is None
+
+
+@pytest_live
+def test_itens_reais_tem_nome_legivel(carregadas):
+    """Nenhuma amostra pode exibir 'revenda'/'producao_interna' como produto."""
+    proibidos = {"revenda", "producao_interna"}
+    com_itens = [a for a in carregadas if a.itens]
+    assert com_itens
+    for amostra in com_itens:
+        for item in amostra.itens:
+            desc = (item.get("descricao") or "").strip().lower()
+            assert desc not in proibidos, f"amostra {amostra.numero_pedido}: produto '{desc}'"
