@@ -2,6 +2,7 @@
 
 Módulos:
     sap      — cliente SAP B1 + queries canônicas
+    pdv      — cliente do PDV (pedidos e amostras), read-only
     livemes  — cliente LiveMES (MES industrial)
     spotter  — cliente Spotter (Exact Sales CRM)
     finance  — fórmulas canônicas: faturamento NET, margem bruta, impostos

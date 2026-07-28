@@ -94,6 +94,16 @@ def get_spotter_token() -> str:
     return os.getenv("SPOTTER_TOKEN", "")
 
 
+def get_pdv_api_url() -> str:
+    """URL base da API externa (read-only) do PDV."""
+    return os.getenv("PDV_API_URL", "https://pdv.velaplast.com.br/api/ext/v1")
+
+
+def get_pdv_api_key() -> str:
+    """Chave `X-API-Key` do PDV. Vazio = não configurado."""
+    return os.getenv("PDV_API_KEY", "")
+
+
 # ─── Logging setup ────────────────────────────────────────────────
 
 def setup_logging(
