@@ -93,9 +93,10 @@ Status de amostra: `Nao_Iniciado`, `Aguardando_Separacao`, `Aguardando_Enviar`,
   qualquer grupo — as contagens por fase não somam o total.
 - **`numero_pedido` ≠ `id`.** O número que o usuário vê é o `numero_pedido`;
   o `id` é interno. `pdv_pedido` aceita os dois.
-- **`parceiros.nome_empresa` é nome fantasia**, não razão social. Ex.: "Spraytec Brasil"
-  no PDV é "LATINA AGRO INDUSTRIA E COMERCIO DE FERTILIZANTES LTDA" (C00293) no SAP —
-  mesma empresa, mesma cidade (Maringá/PR). Não confunda com erro de mapeamento.
+- **`parceiros.nome_empresa` é nome fantasia**, não razão social. Um caso real conferido:
+  a marca cadastrada no PDV corresponde, no SAP, à razão social do grupo que a detém —
+  mesma empresa, mesma cidade. Divergência de nome não é erro de mapeamento; confira
+  por CNPJ (ou pela raiz, no caso de filial) antes de concluir qualquer coisa.
 - **Amostra e Cotação nunca recebem `num_sap`** — por natureza, não geram documento
   no SAP. Só `Pedido` e `Pedido Urgente` devem ter número.
 - Pedir `?limit>1000` devolve **422**, não corta silenciosamente.
@@ -111,18 +112,22 @@ Rodado contra a base real, não mock. `pytest tests/test_pdv_live.py` — 24 tes
 - O nome que o `resolver()` cola em `parceiro` == o que `/parceiros/{id}` devolve.
 
 **Reconciliação externa** (contra o SAP, fonte independente do PDV):
-- 8 `num_sap` amostrados existem como pedido de venda (`ORDR`) no SAP: 3624, 3631,
-  3634, 3637, 3638, 3639, 3640, 3643 — 8/8, e o cliente bate em todos.
+- Amostra de 8 `num_sap` conferida contra `ORDR` no SAP: **8/8** existem como pedido de
+  venda, com o cliente batendo em todos.
 - O valor total que `pdv_pedido` soma bate **ao centavo** com o `DocTotal` do SAP em
-  4/4 conferidos: 219.699,36 (#994) · 88.300,80 (#983) · 9.190,94 (#975) · 8.877,50 (#966).
-  Critério da soma: `quantidade_real` (ou `pedida`, se real vazia) × `valor_unitario`.
+  **4/4** conferidos. Critério da soma: `quantidade_real` (ou `pedida`, se real vazia)
+  × `valor_unitario`.
 
 **Sanity de negócio:**
 - 193 pedidos concluídos sem `num_sap` são **158 amostras (todas já enviadas) + 35 cotações**.
   Pedidos de venda concluídos sem SAP: **zero** — a integração PDV→SAP não tem buraco.
-- 46 pedidos param na fase `inserido_sap` (média 44 dias, máximo 229 — #344 PRENTISS,
-  SAP 3255). Foram lançados no SAP mas ninguém fechou a fase no PDV: é higiene de
-  processo, não erro de dado. Aparecem em `pdv_pipeline` como travados.
+- 46 pedidos param na fase `inserido_sap` (média 44 dias, máximo 229). Foram lançados no
+  SAP mas ninguém fechou a fase no PDV: é higiene de processo, não erro de dado. Aparecem
+  em `pdv_pipeline` como travados.
+
+Os números-fonte por documento e por cliente ficam fora deste repositório, em
+`docs/.evidencia-pdv.md` (não versionado) — reproduza-os pelas tools `pdv_*` quando
+precisar.
 
 ## Manutenção
 
