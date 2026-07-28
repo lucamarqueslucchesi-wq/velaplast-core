@@ -9,6 +9,22 @@ resolve as duas lacunas: `resolver_catalogos()` faz o de/para dos campos `_id`
 e `listar_tudo()` pagina até o fim para que somatórios sejam feitos aqui.
 """
 
+from .amostras import (
+    AREA_POR_ESTAGIO,
+    ESTAGIOS,
+    ESTAGIOS_INTERNOS,
+    SLA_DIAS,
+    Amostra,
+    Etapa,
+    area_responsavel,
+    carregar_amostras,
+    dias_no_estagio,
+    normalizar_estagio,
+    resumo_por_area,
+    tempo_medio_por_estagio,
+    travadas,
+    trilha,
+)
 from .client import PDVClient, PDVError, PDVValidationError
 from .resources import CATALOG_FK, FASES, RECURSOS, STATUS_AMOSTRA
 
@@ -20,4 +36,19 @@ __all__ = [
     "CATALOG_FK",
     "FASES",
     "STATUS_AMOSTRA",
+    # motor de amostras
+    "Amostra",
+    "Etapa",
+    "ESTAGIOS",
+    "ESTAGIOS_INTERNOS",
+    "AREA_POR_ESTAGIO",
+    "SLA_DIAS",
+    "carregar_amostras",
+    "trilha",
+    "dias_no_estagio",
+    "area_responsavel",
+    "normalizar_estagio",
+    "travadas",
+    "resumo_por_area",
+    "tempo_medio_por_estagio",
 ]

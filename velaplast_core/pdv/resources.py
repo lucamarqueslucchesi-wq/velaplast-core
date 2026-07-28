@@ -210,4 +210,8 @@ OPERADORES: list[str] = ["eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "n
 
 LIMIT_MAXIMO = 1000
 LIMIT_PADRAO = 100
-RATE_LIMIT_POR_MINUTO = 100
+#: Teto do servidor é 100/min por chave. Ficamos abaixo de propósito: a chave é
+#: compartilhada entre os workers do app e o MCP, e encostar no teto vira 429.
+RATE_LIMIT_POR_MINUTO = 80
+#: Requisições que podem sair "de uma vez". Mantém a média acima, sem rajada.
+RAJADA_MAXIMA = 8

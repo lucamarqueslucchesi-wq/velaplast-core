@@ -31,6 +31,7 @@ from .resources import (
     LABEL_FIELD,
     LIMIT_MAXIMO,
     OPERADORES,
+    RAJADA_MAXIMA,
     RATE_LIMIT_POR_MINUTO,
     RECURSOS,
 )
@@ -42,6 +43,9 @@ CACHE_MAX_ENTRIES = 200
 RETRY_TOTAL = 4
 RETRY_BACKOFF = 0.5
 RETRY_STATUS = (500, 502, 503, 504)
+#: Tentativas em caso de 429 (a janela do servidor é de 1 minuto).
+RETRY_429_TENTATIVAS = 4
+RETRY_429_ESPERA_MAXIMA = 65.0
 # Teto de segurança em listar_tudo: 50 páginas × 1000 = 50k linhas.
 MAX_PAGINAS = 50
 
@@ -56,12 +60,33 @@ class PDVValidationError(PDVError):
     """Parâmetro inválido detectado antes de chamar a API."""
 
 
-class _TokenBucket:
-    """Token bucket thread-safe (~N req/minuto)."""
+def _espera_do_429(resposta, tentativa: int) -> float:
+    """Segundos a esperar após um 429: honra `Retry-After`, senão dobra o recuo."""
+    cabecalho = (resposta.headers or {}).get("Retry-After")
+    if cabecalho:
+        try:
+            return min(float(cabecalho) + 0.5, RETRY_429_ESPERA_MAXIMA)
+        except (TypeError, ValueError):
+            pass
+    return min(5.0 * (2 ** tentativa), RETRY_429_ESPERA_MAXIMA)
 
-    def __init__(self, per_minute: int = RATE_LIMIT_POR_MINUTO) -> None:
-        self.capacity = float(per_minute)
-        self.tokens = float(per_minute)
+
+class _TokenBucket:
+    """Token bucket thread-safe: taxa média de N req/minuto, com rajada limitada.
+
+    A capacidade do balde é a RAJADA, não a cota do minuto. Começar com 100 fichas
+    deixava disparar 100 requisições no mesmo segundo — o servidor conta a janela
+    dele e devolve 429 antes de a nossa média sequer chegar ao teto. Com rajada
+    curta, a mesma cota sai espaçada e o 429 some.
+    """
+
+    def __init__(
+        self,
+        per_minute: int = RATE_LIMIT_POR_MINUTO,
+        rajada: int = RAJADA_MAXIMA,
+    ) -> None:
+        self.capacity = float(max(1, min(rajada, per_minute)))
+        self.tokens = self.capacity
         self.refill_rate = per_minute / 60.0
         self.last_refill = time.monotonic()
         self._lock = threading.Lock()
@@ -93,7 +118,17 @@ class PDVClient:
         pedido = pdv.obter("pedidos", 1096)
     """
 
-    def __init__(self, url: str | None = None, api_key: str | None = None) -> None:
+    #: Balde COMPARTILHADO por todas as instâncias do processo. O teto de 100/min
+    #: é do servidor, não do cliente: um balde por instância deixaria N clientes
+    #: somarem N×100 e tomarem 429 (foi o que aconteceu ao rodar duas suítes juntas).
+    _bucket_compartilhado = _TokenBucket()
+
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        bucket_proprio: bool = False,
+    ) -> None:
         # .strip() é obrigatório: chave copiada de .env com \r (CRLF) quebra o header.
         self.base_url = (url or get_pdv_api_url()).strip().rstrip("/")
         self.api_key = (api_key or get_pdv_api_key()).strip()
@@ -115,7 +150,7 @@ class PDVClient:
         self.session.mount("http://", adapter)
         self.session.headers.update({"X-API-Key": self.api_key, "Accept": "application/json"})
 
-        self._bucket = _TokenBucket()
+        self._bucket = _TokenBucket() if bucket_proprio else PDVClient._bucket_compartilhado
         self._cache: dict[str, tuple[float, Any]] = {}
         self._cache_lock = threading.Lock()
         self._catalog_cache: dict[int, dict] | None = None
@@ -194,17 +229,24 @@ class PDVClient:
         if em_cache is not None:
             return em_cache
 
-        self._bucket.acquire()
         url = f"{self.base_url}/{path.lstrip('/')}" if path else self.base_url
-        try:
-            r = self.session.get(url, params=params, timeout=timeout)
-        except requests.RequestException as e:
-            raise PDVError(f"falha de rede ao chamar {url}: {e}") from e
 
-        if r.status_code == 429:
-            # A API corta em 100 req/min. Espera curta e uma única retentativa.
-            time.sleep(2.0)
-            r = self.session.get(url, params=params, timeout=timeout)
+        # A API corta em 100 req/min por chave. O balde local evita chegar lá, mas
+        # outros processos (workers do gunicorn) compartilham a mesma chave — então
+        # o 429 ainda pode vir. Recua o suficiente para a janela virar.
+        for tentativa in range(RETRY_429_TENTATIVAS):
+            self._bucket.acquire()
+            try:
+                r = self.session.get(url, params=params, timeout=timeout)
+            except requests.RequestException as e:
+                raise PDVError(f"falha de rede ao chamar {url}: {e}") from e
+            if r.status_code != 429:
+                break
+            if tentativa == RETRY_429_TENTATIVAS - 1:
+                break
+            espera = _espera_do_429(r, tentativa)
+            log.warning("PDV 429 em %s — aguardando %.1fs (tentativa %d)", path, espera, tentativa + 1)
+            time.sleep(espera)
 
         if not r.ok:
             try:
