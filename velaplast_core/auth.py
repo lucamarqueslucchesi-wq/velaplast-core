@@ -23,6 +23,7 @@ import bcrypt
 import jwt
 from flask import jsonify, request
 
+from velaplast_core import agente
 from velaplast_core.config import get_jwt_expiry_hours, get_jwt_secret
 
 log = logging.getLogger(__name__)
@@ -146,10 +147,16 @@ def login_required(f: Callable[..., Any]) -> Callable[..., Any]:
     Le `Authorization: Bearer <token>` (ou cookie `token`), decoda, e
     anexa o payload em `request.user`. Retorna 401 JSON se ausente ou
     invalido.
+
+    Com asserção válida do gateway (velaplast_core.agente), usa o usuário do agente.
     """
 
     @wraps(f)
     def decorated(*args: Any, **kwargs: Any) -> Any:
+        usuario_agente = agente.usuario_do_agente()
+        if usuario_agente is not None:
+            request.user = usuario_agente  # type: ignore[attr-defined]
+            return f(*args, **kwargs)
         token = _extract_token()
         if not token:
             return jsonify({"error": "Token nao fornecido"}), 401
