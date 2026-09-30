@@ -40,6 +40,8 @@ def verificar(token: str, app_id: str, metodo: str, rota: str) -> dict[str, Any]
         )
     except jwt.ExpiredSignatureError as exc:
         raise AssercaoInvalida("expirada") from exc
+    except jwt.InvalidKeyError as exc:
+        raise AssercaoInvalida("chave_publica_invalida") from exc
     except jwt.InvalidTokenError as exc:
         raise AssercaoInvalida(type(exc).__name__) from exc
     if int(claims["exp"]) - int(claims["iat"]) > VIDA_MAXIMA_S:

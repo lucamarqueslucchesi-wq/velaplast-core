@@ -153,6 +153,60 @@ def test_header_vazio_da_401(cliente):
     assert cliente.get("/x", headers=_h("")).status_code == 401
 
 
+def test_chave_publica_mal_formada_da_401(cliente, monkeypatch):
+    monkeypatch.setenv("AGENTE_GATEWAY_PUBKEY", "lixo")
+    tok = _token()
+    r = cliente.get("/x", headers=_h(tok))
+    assert r.status_code == 401 and r.get_json()["motivo"] == "chave_publica_invalida"
+
+
+def test_hs256_com_pem_publico_como_segredo_da_401(cliente):
+    # Token encoded with HS256 instead of EdDSA — should be rejected
+    iat = int(time.time())
+    claims = {"iss": "velaplast-mcp", "aud": "crm", "sub": "luca@velaplast.com.br", "metodo": "GET", "rota": "/x",
+              "iat": iat, "exp": iat + 60, "jti": "j1"}
+    # Use a fake HMAC secret (not the actual PEM)
+    tok = jwt.encode(claims, "fake-hmac-secret", algorithm="HS256")
+    r = cliente.get("/x", headers=_h(tok))
+    assert r.status_code == 401
+
+
+def test_alg_none_da_401(cliente):
+    # Token with algorithm "none" — PyJWT may refuse to encode it, so build manually if needed
+    iat = int(time.time())
+    claims = {"iss": "velaplast-mcp", "aud": "crm", "sub": "luca@velaplast.com.br", "metodo": "GET", "rota": "/x",
+              "iat": iat, "exp": iat + 60, "jti": "j1"}
+    try:
+        tok = jwt.encode(claims, key=None, algorithm="none")
+    except Exception:
+        # If PyJWT refuses, build compact form manually
+        import base64
+        import json
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).rstrip(b'=').decode()
+        payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b'=').decode()
+        tok = f"{header}.{payload}."
+    r = cliente.get("/x", headers=_h(tok))
+    assert r.status_code == 401
+
+
+def test_assinatura_adulterada_da_401(cliente):
+    # Take a valid token and modify the signature segment
+    tok = _token()
+    parts = tok.split('.')
+    # Replace signature with garbage (but keep base64url format)
+    sig_altered = 'A' * len(parts[2])  # replace with all A's
+    parts[2] = sig_altered
+    tok_alterado = '.'.join(parts)
+    r = cliente.get("/x", headers=_h(tok_alterado))
+    assert r.status_code == 401
+
+
+def test_head_com_claim_get_da_401(cliente):
+    # HEAD request with a token claiming GET — should fail on method/rota check
+    r = cliente.head("/x", headers=_h(_token(metodo="GET", rota="/x")))
+    assert r.status_code == 401
+
+
 def test_role_required_respeita_papel_do_agente(cliente):
     ok = cliente.get("/so-admin", headers=_h(_token(rota="/so-admin")))
     nao = cliente.get("/so-admin", headers=_h(_token(sub="ana@velaplast.com.br", rota="/so-admin")))
