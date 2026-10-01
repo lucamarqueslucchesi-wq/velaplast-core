@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "velaplast-core"
-version = "0.3.0"
+version = "0.4.0"
 description = "Biblioteca Velaplast: SAP B1, LiveMES, Spotter, fórmulas financeiras canônicas, AI multi-provider, infra comum."
 requires-python = ">=3.11"
 authors = [{ name = "Velaplast" }]

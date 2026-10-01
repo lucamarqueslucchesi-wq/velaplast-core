@@ -2,10 +2,12 @@
 
 Com o header X-Agente-Assertion (JWT EdDSA assinado pelo gateway), a request roda como o
 usuário LOCAL do app com aquele e-mail — papel e filtros do app valem. Sem o header, nada
-muda. Onda 1a: só GET. Chave pública em AGENTE_GATEWAY_PUBKEY (PEM; aceita '\\n' literal).
+muda. Onda 1a: só GET. Onda 1b: escrita só na lista fechada do app, com jti de uso único e hash do corpo. Chave pública em AGENTE_GATEWAY_PUBKEY (PEM; aceita '\\n' literal).
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from typing import Any, Callable
 
@@ -51,8 +53,31 @@ def verificar(token: str, app_id: str, metodo: str, rota: str) -> dict[str, Any]
     return claims
 
 
-def instalar(app: Flask, app_id: str, carregar_usuario: Callable[[str], dict | None]) -> None:
-    """carregar_usuario(email) devolve o dict no formato do request.user do app, ou None (sem acesso)."""
+def _checar_escrita(claims: dict, permitidas: frozenset, registrar_jti):
+    if not permitidas:
+        return jsonify({"error": "metodo_nao_permitido"}), 403
+    regra = request.url_rule.rule if request.url_rule is not None else None
+    if (request.method, regra) not in permitidas:
+        return jsonify({"error": "escrita_nao_permitida"}), 403
+    jti, esperado = claims.get("jti"), claims.get("corpo_sha256")
+    if not jti or not esperado:
+        return jsonify({"error": "assercao_invalida", "motivo": "sem_jti_ou_corpo"}), 401
+    recebido = hashlib.sha256(request.get_data(cache=True)).hexdigest()
+    if not hmac.compare_digest(recebido, str(esperado)):
+        return jsonify({"error": "assercao_invalida", "motivo": "corpo_divergente"}), 401
+    if not registrar_jti(str(jti), int(claims["exp"])):
+        return jsonify({"error": "assercao_reutilizada"}), 409
+    return None
+
+
+def instalar(app: Flask, app_id: str, carregar_usuario: Callable[[str], dict | None],
+             escritas: set[tuple[str, str]] | None = None,
+             registrar_jti: Callable[[str, int], bool] | None = None) -> None:
+    """carregar_usuario(email) devolve o dict no formato do request.user do app, ou None (sem acesso).
+    escritas = {(METODO, regra Flask)} liberadas ao agente; exige registrar_jti(jti, exp) -> True se inédito."""
+    if escritas is not None and registrar_jti is None:
+        raise ValueError("escritas exige registrar_jti (anti-replay)")
+    permitidas = frozenset((m.upper(), r) for m, r in (escritas or ()))
 
     @app.before_request
     def _agente():
@@ -64,13 +89,24 @@ def instalar(app: Flask, app_id: str, carregar_usuario: Callable[[str], dict | N
         except AssercaoInvalida as exc:
             return jsonify({"error": "assercao_invalida", "motivo": str(exc)}), 401
         if request.method not in METODOS_PERMITIDOS:
-            return jsonify({"error": "metodo_nao_permitido"}), 403
+            erro = _checar_escrita(claims, permitidas, registrar_jti)
+            if erro is not None:
+                return erro
         usuario = carregar_usuario(str(claims["sub"]).strip().lower())
         if not usuario:
             return jsonify({"error": "usuario_sem_acesso"}), 403
         g.agente_usuario = dict(usuario, via_agente=True)
         g.agente_assercao = claims
         return None
+
+    def _eu():
+        u = usuario_do_agente()
+        if not u:
+            return jsonify({"error": "nao_autenticado"}), 401
+        return jsonify({"user_id": u.get("user_id"), "email": u.get("email"),
+                        "nome": u.get("nome") or u.get("name"), "role": u.get("role")})
+
+    app.add_url_rule("/_agente/eu", "velaplast_agente_eu", _eu, methods=["GET"])
 
 
 def usuario_do_agente() -> dict | None:
@@ -79,4 +115,8 @@ def usuario_do_agente() -> dict | None:
     return g.get("agente_usuario")
 
 
-__all__ = ["HEADER", "EMISSOR", "AssercaoInvalida", "verificar", "instalar", "usuario_do_agente"]
+def via_agente() -> bool:
+    return usuario_do_agente() is not None
+
+
+__all__ = ["HEADER", "EMISSOR", "AssercaoInvalida", "verificar", "instalar", "usuario_do_agente", "via_agente"]
